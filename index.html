@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How FlashAttention Works · Inference Interactive</title>
+    <meta name="description" content="Explore a real attention kernel, change its setup and see how tiling and on-chip memory make LLM inference fast: a coloured-pencil 3D machine you can pause, step and compare." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fuzzy+Bubbles:wght@400;700&family=Patrick+Hand&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>(function(){function m(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("_")}catch(e){try{Object.defineProperty(window,n,{value:m(),configurable:true})}catch(_){}}})})();</script>
+    <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
+  </head>
+  <body>
+    <main class="app">
+      <section class="col col-left">
+        <p class="badge hl">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 L5 13 H11 L9 22 L19 9 H13 Z"/></svg>
+          Inference Interactive
+        </p>
+        <h1 class="title">How <span class="hl hl-big">FlashAttention</span> Works<span class="doodle doodle-title" aria-hidden="true"></span></h1>
+        <p class="intro">Explore a real attention kernel, change its setup and see how tiling and fast on-chip memory speed up LLM inference.</p>
+        <div class="tabs" role="tablist" aria-label="What to look at">
+          <button type="button" role="tab" aria-selected="true" class="tab wob is-on" data-tab="kernel" data-showcase="tab-kernel">
+            <svg viewBox="0 0 64 56" class="tab-art" aria-hidden="true"><rect x="10" y="14" width="44" height="30" rx="5" fill="#3a3438"/><rect x="21" y="21" width="22" height="16" rx="3" fill="#f2c94c" stroke="#c9951a" stroke-width="2"/><path d="M15 8v6M25 8v6M35 8v6M45 8v6M15 44v6M25 44v6M35 44v6M45 44v6" stroke="#3a3438" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+            <span>Kernel</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" class="tab wob" data-tab="parts" data-showcase="tab-parts">
+            <svg viewBox="0 0 64 56" class="tab-art" aria-hidden="true"><g fill="none" stroke-width="2.2"><rect x="8" y="26" width="14" height="10" rx="2" fill="#e3dcf7" stroke="#8a6fd0"/><rect x="26" y="26" width="14" height="10" rx="2" fill="#fde384" stroke="#c9951a"/><rect x="44" y="26" width="12" height="10" rx="2" fill="#fbe1dd" stroke="#c4473a"/><path d="M15 22v-6h32v6" stroke="#4a4347" stroke-dasharray="3 3"/><path d="M15 40v5M33 40v5M50 40v5" stroke="#4a4347"/><path d="M10 51h46" stroke="#4a4347" stroke-linecap="round"/></g><text x="9" y="14" font-size="9" fill="#4a4347">HBM</text><text x="27" y="14" font-size="9" fill="#4a4347">SRAM</text><text x="46" y="14" font-size="9" fill="#c4473a">out</text></svg>
+            <span>Parts</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" class="tab wob" data-tab="principle" data-showcase="tab-principle">
+            <svg viewBox="0 0 64 56" class="tab-art" aria-hidden="true"><g fill="none" stroke-linecap="round"><rect x="8" y="8" width="30" height="30" rx="2" stroke="#c4473a" stroke-width="2.2"/><path d="M8 18h30M8 28h30M18 8v30M28 8v30" stroke="#c4473a" stroke-width="1.4" opacity=".55"/><path d="M46 14 L58 14 M52 8 L58 14 L52 20" stroke="#f39a2e" stroke-width="3"/><rect x="44" y="26" width="14" height="12" rx="2" fill="#fde384" stroke="#c9951a" stroke-width="2.2"/><path d="M10 46c8 6 34 6 44 0" stroke="#3f7de6" stroke-width="2.4" stroke-dasharray="1 5"/></g></svg>
+            <span>Principle</span>
+          </button>
+        </div>
+        <aside class="diagrams wob" aria-label="Live diagrams" data-showcase="diagrams">
+          <h3><span class="hl">Live diagrams</span></h3>
+          <div class="diag-axle">
+            <figure class="axle-view" id="tile-diagram"></figure>
+            <ul class="diag-key">
+              <li><span class="k k-dot" aria-hidden="true"></span>Q tile rows</li>
+              <li><span class="k k-cross" aria-hidden="true">×</span>K,V tile columns</li>
+              <li><span class="k k-push" aria-hidden="true"></span>scores stay on chip</li>
+              <li><span class="k k-field" aria-hidden="true"></span>output rows</li>
+            </ul>
+          </div>
+          <figure class="push-graph" id="traffic-graph"></figure>
+        </aside>
+      </section>
+      <section class="col col-mid" aria-label="The kernel">
+        <div class="showbar" role="group" aria-label="Show on the machine">
+          <span class="showbar-lead">Show:</span>
+          <button type="button" aria-pressed="true" class="chip chip-field is-on" data-chip="showFlow" data-showcase="chip-flow"><span class="chip-mark"></span>Tile flow</button>
+          <button type="button" aria-pressed="true" class="chip chip-flow is-on" data-chip="showGrid" data-showcase="chip-grid"><span class="chip-mark"></span>Score grid</button>
+          <button type="button" aria-pressed="true" class="chip chip-force is-on" data-chip="showTraffic" data-showcase="chip-traffic"><span class="chip-mark"></span>Memory traffic</button>
+          <button type="button" aria-pressed="false" class="chip chip-tag" data-chip="showLabels" data-showcase="chip-labels"><span class="chip-mark"></span>Part labels</button>
+        </div>
+        <div class="stage-cell">
+          <div class="stage" id="stage" role="img" aria-label="A coloured-pencil 3D machine that runs attention: slow memory banks on the left, a fast chip with small tiles on the right. Drag to turn it." data-showcase="stage"></div>
+          <div class="labels" id="labels" aria-hidden="true"></div>
+          <p class="no3d" id="no3d" hidden>The machine runs in 3D in a recent browser. The controls still work here.</p>
+        </div>
+        <div class="pill wob" data-showcase="playback">
+          <button type="button" class="round" id="btn-compare" aria-label="Run the standard kernel instead" aria-pressed="false">
+            <svg class="ic ic-ccw" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 10a8 8 0 1 1 2 6"/><path d="M4 4v6h6"/></svg>
+          </button>
+          <button type="button" class="play" id="btn-play" aria-label="Pause">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><g class="ic-pause"><path d="M8 5v14M16 5v14"/></g><path class="ic-play" d="M8 5l11 7-11 7z" style="display:none"/></svg>
+          </button>
+          <button type="button" class="round" id="btn-reset" aria-label="Restart the pass">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M20 14a8 8 0 1 1-2-6"/><path d="M20 4v6h-6"/></svg>
+          </button>
+        </div>
+        <div class="bench" data-showcase="bench">
+          <div class="meters wob">
+            <div class="meter meter-yellow"><span class="meter-label">HBM traffic</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" id="m-traffic-fill"></span></span><span class="meter-val" id="m-traffic">0 MB</span></div>
+            <div class="meter meter-orange"><span class="meter-label">Scores stored</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" id="m-stored-fill"></span></span><span class="meter-val" id="m-stored">none</span></div>
+            <div class="meter meter-red"><span class="meter-label">Speedup</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" id="m-speed-fill"></span></span><span class="meter-val" id="m-speed">1.0×</span></div>
+          </div>
+          <div class="hold wob">
+            <div class="row">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M8 12V6a1.6 1.6 0 0 1 3.2 0v5M11.2 11V4.8a1.6 1.6 0 0 1 3.2 0V11M14.4 11V6.4a1.6 1.6 0 0 1 3.2 0v6.4c0 4-2.4 6.6-5.6 6.6-2.4 0-3.8-1-5.4-3.4L4 12.6c-.8-1.2.6-2.6 1.8-1.7L8 12"/></svg>
+              <span class="row-label">Hold the pass</span>
+              <button type="button" class="switch" id="hold-switch" role="switch" aria-checked="false" aria-label="Hold the pass"><span class="knob"></span></button>
+            </div>
+            <label class="range is-off" id="hold-range">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 20L20 4M4 20h6M4 20v-6"/></svg>
+              <span class="row-label">Tile step</span>
+              <span class="range-val" id="hold-val">1 of 4</span>
+              <input type="range" id="hold-slider" min="0" max="3" step="1" value="0" aria-label="Tile step" />
+            </label>
+            <p class="hold-hint" id="hold-hint">Hold it still to inspect each tile step.</p>
+          </div>
+        </div>
+      </section>
+      <section class="col col-right">
+        <article class="panel wob idea" data-showcase="idea">
+          <h2>
+            <svg class="h-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 6a12 12 0 0 0-7 21.7c2 1.7 3 3.4 3 5.3h8c0-1.9 1-3.6 3-5.3A12 12 0 0 0 24 6z" fill="#fde384" stroke="#c9951a" stroke-width="2"/><path d="M20 37h8M21 41h6" stroke="#1f1a1d" stroke-width="2" stroke-linecap="round"/><path d="M24 14v6M19 16l3 4M29 16l-3 4" stroke="#c9951a" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span class="hl hl-lav">The Core Idea</span>
+          </h2>
+          <div class="idea-body">
+            <p>Attention only needs small working tiles: keep scores on the fast chip, carry a running max and sum, and never write the full matrix to slow memory.</p>
+            <figure class="hand-fig">
+              <svg viewBox="0 0 120 112" role="img" aria-label="A big score grid with one small tile lit up, and the running max, sum and output beside it">
+                <rect x="6" y="8" width="70" height="70" rx="4" fill="#fffaf3" stroke="#c4473a" stroke-width="2"/>
+                <path d="M6 25h70M6 43h70M6 60h70M23 8v70M40 8v70M58 8v70" stroke="#c4473a" stroke-width="1" opacity=".45" fill="none"/>
+                <rect x="23" y="25" width="17" height="17" fill="#fde384" stroke="#c9951a" stroke-width="2"/>
+                <path d="M84 22 L96 22 M90 16 L96 22 L90 28" stroke="#f39a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                <rect x="98" y="14" width="16" height="14" rx="2" fill="#e3dcf7" stroke="#8a6fd6" stroke-width="1.6"/>
+                <path d="M84 52 L96 52 M90 46 L96 52 L90 58" stroke="#f39a2e" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+                <rect x="98" y="44" width="16" height="14" rx="2" fill="#fde384" stroke="#c9951a" stroke-width="1.6"/>
+              </svg>
+              <span class="hf hf-m">m</span>
+              <span class="hf hf-l">ℓ</span>
+              <span class="hf hf-o">O</span>
+            </figure>
+          </div>
+        </article>
+        <article class="panel wob controls" data-showcase="controls">
+          <h2>
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 8h10M18 8h2M4 16h4M12 16h8"/><circle cx="16" cy="8" r="2.4"/><circle cx="10" cy="16" r="2.4"/></svg>
+            <span class="hl">Controls</span>
+          </h2>
+          <p class="ctl-group">Switch</p>
+          <div class="tiles">
+            <button type="button" class="tile is-on" id="tile-compute" data-showcase="sw-compute">
+              <svg class="ic ic-bolt" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 L5 13 H11 L9 22 L19 9 H13 Z"/></svg>
+              Compute
+              <span class="switch switch-sm is-on"><span class="knob"></span></span>
+            </button>
+            <button type="button" class="tile" id="tile-standard" data-showcase="sw-standard">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 8 H19 M15 4 L19 8 L15 12 M20 16 H5 M9 12 L5 16 L9 20"/></svg>
+              Standard
+              <span class="switch switch-sm"><span class="knob"></span></span>
+            </button>
+            <button type="button" class="tile is-on" id="tile-causal" data-showcase="sw-causal">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 4h16v16H4z"/><path d="M4 4 L20 20" stroke-width="2.2"/><path d="M4 12h7M4 18h12M12 4v7" opacity=".5"/></svg>
+              Causal
+              <span class="switch switch-sm is-on"><span class="knob"></span></span>
+            </button>
+          </div>
+          <p class="ctl-group">Adjust</p>
+          <div class="ranges">
+            <label class="range">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 5h16M4 10h16M4 15h16M4 20h16" stroke-dasharray="3 2.4"/></svg>
+              <span class="row-label">Sequence length</span><span class="range-val" id="v-seq">8k</span>
+              <input type="range" id="r-seq" min="0" max="5" step="1" value="3" aria-label="Sequence length" />
+            </label>
+            <label class="range">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><rect x="4" y="8" width="16" height="8" rx="2"/><path d="M8 8v8M12 8v8M16 8v8" opacity=".55"/></svg>
+              <span class="row-label">Head dim</span><span class="range-val" id="v-dim">64</span>
+              <input type="range" id="r-dim" min="0" max="2" step="1" value="1" aria-label="Head dim" />
+            </label>
+            <label class="range">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+              <span class="row-label">Tile rows</span><span class="range-val" id="v-tile">64</span>
+              <input type="range" id="r-tile" min="0" max="2" step="1" value="1" aria-label="Tile rows" />
+            </label>
+            <label class="range">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 18a9 9 0 1 1 16 0"/><path d="M12 18l4-5"/></svg>
+              <span class="row-label">Pass speed</span><span class="range-val" id="v-speed">70%</span>
+              <input type="range" id="r-speed" min="0.15" max="1" step="0.05" value="0.7" aria-label="Pass speed" />
+            </label>
+          </div>
+          <p class="ctl-group">Phase of inference</p>
+          <div class="seg seg-wide" role="radiogroup" aria-label="Inference phase" data-showcase="phase">
+            <button type="button" role="radio" aria-checked="true" class="is-on" data-phase="prefill">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+              Prefill
+            </button>
+            <button type="button" role="radio" aria-checked="false" data-phase="decode">
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M4 12h13M13 6l6 6-6 6"/></svg>
+              Decode
+            </button>
+          </div>
+          <p class="ring-hint" id="phase-hint">Every query row arrives together; tiling keeps scores on chip.</p>
+        </article>
+      </section>
+    </main>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <filter id="wobble"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3"/></filter>
+    </svg>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
