@@ -13,6 +13,7 @@ function hatchTexture(color = '#4a4347', gap = 7, alpha = 0.16) {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 128, 128);
   x.strokeStyle = color; x.globalAlpha = alpha; x.lineWidth = 1.4; x.lineCap = 'round';
   for (let i = -128; i < 128; i += gap) {
     x.beginPath();
@@ -125,7 +126,7 @@ export function createScene(stageEl, labelsEl, bus) {
   scene.add(sun);
 
   // Table
-  const table = box(11.5, 0.5, 7.6, COL.table, { gap: 9, hatchAlpha: 0.12 });
+  const table = box(11.5, 0.5, 7.6, COL.table, { gap: 11, hatchAlpha: 0.07 });
   table.position.y = -0.25;
   scene.add(table);
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(11, 7), new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, opacity: 0.9 }));
@@ -176,7 +177,7 @@ export function createScene(stageEl, labelsEl, bus) {
 
   // GPU chip (right): fast, small
   const chip = new THREE.Group();
-  const board = box(3.1, 0.5, 4.2, COL.chip, { hatchColor: '#000', gap: 10, hatchAlpha: 0.2 });
+  const board = box(3.1, 0.5, 4.2, 0x6a5f68, { hatchColor: '#2a2528', gap: 10, hatchAlpha: 0.15 });
   board.position.y = 0.55;
   chip.add(board);
   const sram = box(1.7, 0.6, 2.1, COL.sram, { hatchColor: '#8a6a10', gap: 6 });
