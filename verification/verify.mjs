@@ -39,5 +39,16 @@ ok('steps track rows/tile', pre.steps === Math.ceil(8192 / 64));
 ok('traffic grows with length', model({ ...base, seqIdx: 5 }).std > model({ ...base, seqIdx: 0 }).std);
 ok('fmtBytes sane', fmtBytes(536870912) === '512 MB');
 
+
+// Label overlap rule (fleet ground rule): silhouette-aware placement, gated, hidden while orbiting
+ok('labels gated on showLabels chip', scene.includes('st8.showLabels'));
+ok('labels hidden while orbiting', scene.includes('!dragging) project('));
+ok('labels avoid model silhouette', scene.includes('modelScreenRect') && scene.includes('machineBox'));
+ok('labels de-overlap each other', scene.includes('placed.find'));
+ok('part labels reachable from kernel tab', scene.includes("modes: ['kernel','parts']"));
+ok('tab presets sync chips like the reference', app.includes('TAB_PRESETS') && app.includes('showLabels: true'));
+ok('memory-traffic chip drives the data arrows', scene.includes('arrows.visible = st8.showTraffic'));
+ok('label text sits outside pill boxes by default', css.includes('.plabel-text{white-space:nowrap;color:var(--ink);background:none'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

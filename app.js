@@ -1,11 +1,11 @@
 // How FlashAttention Works - UI state, model and diagrams.
 // The 3D machine lives in scene.js; this file owns state, panels and SVG diagrams.
-import { createScene } from './scene.js?v=3';
+import { createScene } from './scene.js?v=4';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-import { SEQS, DIMS, TILES, model, fmtBytes, fmtSeq } from './model.js?v=3';
+import { SEQS, DIMS, TILES, model, fmtBytes, fmtSeq } from './model.js?v=4';
 
 const defaults = {
   tab: 'kernel',
@@ -202,7 +202,12 @@ function render() {
 }
 
 // ---- Wiring ----
-$$('.tab[data-tab]').forEach((b) => b.addEventListener('click', () => set({ tab: b.dataset.tab })));
+const TAB_PRESETS = {
+  kernel: { showFlow: true, showGrid: true, showTraffic: true, showLabels: false },
+  parts: { showFlow: false, showGrid: false, showTraffic: false, showLabels: true },
+  principle: { showFlow: true, showGrid: true, showTraffic: true, showLabels: true },
+};
+$$('.tab[data-tab]').forEach((b) => b.addEventListener('click', () => set({ tab: b.dataset.tab, ...(TAB_PRESETS[b.dataset.tab] || {}) })));
 $$('.chip[data-chip]').forEach((c) => c.addEventListener('click', () => set({ [c.dataset.chip]: !state[c.dataset.chip] })));
 $('#tile-compute').addEventListener('click', () => set({ compute: !state.compute }));
 $('#tile-standard').addEventListener('click', () => set({ standard: !state.standard }));

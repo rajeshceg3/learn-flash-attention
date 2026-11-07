@@ -37,7 +37,8 @@ button:focus-visible,input:focus-visible{outline:2.5px solid var(--blue);outline
 .plabel{opacity:0;will-change:transform;transition:opacity .35s;position:absolute;top:0;left:0}
 .plabel-dot{background:var(--ink);border-radius:50%;width:7px;height:7px;position:absolute;top:-3.5px;left:-3.5px;box-shadow:0 0 0 2px #fdf6f2e6}
 .plabel-line{background:var(--ink);transform-origin:0;height:1.5px;position:absolute;top:-.75px;left:0}
-.plabel-text{white-space:nowrap;color:var(--ink);background:#fdf6f2eb;border-radius:8px;padding:4px 8px 5px;font-size:19px;line-height:1;position:absolute;top:0;left:0}
+.plabel-text{white-space:nowrap;color:var(--ink);background:none;padding:0;font-size:16px;line-height:1;position:absolute;top:0;left:0;text-shadow:0 0 5px #fdf6f2,0 1px 0 #fdf6f2,0 -1px 0 #fdf6f2}
+.plabel-note .plabel-text,.plabel-blue .plabel-text{background:#fdf6f2d9;border-radius:8px;padding:3px 7px 4px}
 .plabel-note .plabel-text{color:#b5332b}
 .plabel-blue .plabel-text{color:#2f63bf}
 .plabel-mark .plabel-dot,.plabel-mark .plabel-line{display:none}

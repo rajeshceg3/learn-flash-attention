@@ -230,15 +230,37 @@ export function createScene(stageEl, labelsEl, bus) {
   }
   buildArrows(false);
 
+  // 2D silhouette of the machine: labels must land outside this rect
+  const machineBox = new THREE.Box3();
+  {
+    const tb = new THREE.Box3();
+    scene.updateMatrixWorld(true);
+    [table, hbm, chip, sheet].forEach((o) => { tb.setFromObject(o); machineBox.union(tb); });
+    machineBox.expandByScalar(0.1);
+  }
+  const corner = new THREE.Vector3();
+  function modelScreenRect(w, h) {
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (let i = 0; i < 8; i++) {
+      corner.set(i & 1 ? machineBox.max.x : machineBox.min.x, i & 2 ? machineBox.max.y : machineBox.min.y, i & 4 ? machineBox.max.z : machineBox.min.z).project(camera);
+      if (corner.z >= 1) continue;
+      const sx = (corner.x * 0.5 + 0.5) * w, sy = (-corner.y * 0.5 + 0.5) * h;
+      minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+    }
+    if (minX > maxX) return { minX: w * 0.35, maxX: w * 0.65, minY: h * 0.35, maxY: h * 0.65 };
+    return { minX, minY, maxX, maxY };
+  }
+
   // ---- HTML labels ----
   const LABEL_DEFS = [
-    { id: 'hbm', text: 'HBM: big, slow memory', obj: hbm, off: [-1.2, 2.6, 0], cls: '', modes: ['parts'] },
-    { id: 'sram', text: 'SRAM: small, on-chip, fast', obj: sram, off: [0, 1.1, 0], cls: '', modes: ['parts'] },
-    { id: 'q', text: 'Q tile', obj: qCards[1], off: [0, 0.55, 0], cls: '', modes: ['parts'] },
-    { id: 'kv', text: 'K,V tiles', obj: kvCards[2], off: [0, 0.55, 0], cls: '', modes: ['parts'] },
-    { id: 'sc', text: 'score tile', obj: scoreTile, off: [0, 0.35, 0], cls: '', modes: ['parts'] },
-    { id: 'out', text: 'finished output rows', obj: oCards[1], off: [0, 0.6, 0], cls: 'plabel-blue', modes: ['parts'] },
-    { id: 'kvc', text: 'KV cache', obj: kvRack, off: [0, 0.75, 0], cls: '', modes: ['parts'], decode: true },
+    { id: 'hbm', text: 'HBM: big, slow memory', obj: hbm, off: [-1.2, 2.6, 0], cls: '', modes: ['kernel','parts'] },
+    { id: 'sram', text: 'SRAM: small, on-chip, fast', obj: sram, off: [0, 1.1, 0], cls: '', modes: ['kernel','parts'] },
+    { id: 'q', text: 'Q tile', obj: qCards[1], off: [0, 0.55, 0], cls: '', modes: ['kernel','parts'] },
+    { id: 'kv', text: 'K,V tiles', obj: kvCards[2], off: [0, 0.55, 0], cls: '', modes: ['kernel','parts'] },
+    { id: 'sc', text: 'score tile', obj: scoreTile, off: [0, 0.35, 0], cls: '', modes: ['kernel','parts'] },
+    { id: 'out', text: 'finished output rows', obj: oCards[1], off: [0, 0.6, 0], cls: 'plabel-blue', modes: ['kernel','parts'] },
+    { id: 'kvc', text: 'KV cache', obj: kvRack, off: [0, 0.75, 0], cls: '', modes: ['kernel','parts'], decode: true },
     { id: 'n1', text: 'scores never leave the chip', obj: scoreTile, off: [0.2, 1.15, 0], cls: 'plabel-note', modes: ['principle'] },
     { id: 'n2', text: 'running max m', obj: dialM, off: [0, 0.5, 0], cls: 'plabel-note', modes: ['principle'] },
     { id: 'n3', text: 'running sum ℓ', obj: dialL, off: [0, 0.5, 0], cls: 'plabel-note', modes: ['principle'] },
@@ -288,26 +310,45 @@ export function createScene(stageEl, labelsEl, bus) {
   resize();
 
   const v = new THREE.Vector3();
-  function project(obj, off, el) {
+  function project(obj, off, el, rect, placed, w, h) {
     obj.updateWorldMatrix(true, false);
     v.set(...off).applyMatrix4(obj.matrixWorld);
     v.project(camera);
-    const w = stageEl.clientWidth, h = stageEl.clientHeight;
+    if (v.z >= 1) { el.style.opacity = 0; return; }
     const x = (v.x * 0.5 + 0.5) * w, y = (-v.y * 0.5 + 0.5) * h;
-    const visible = v.z < 1;
-    el.style.opacity = visible ? 1 : 0;
-    if (visible) {
-      const text = el.querySelector('.plabel-text');
-      const tw = text.offsetWidth, th = text.offsetHeight;
-      const dx = x > w * 0.62 ? -(tw + 30) : 30;
-      const dy = y > h * 0.6 ? -(th + 16) : -th - 22;
-      el.style.transform = `translate(${x}px, ${y}px)`;
-      const line = el.querySelector('.plabel-line');
-      const len = Math.hypot(dx, dy + th / 2);
-      line.style.width = `${len}px`;
-      line.style.transform = `rotate(${Math.atan2(dy + th / 2, dx)}rad)`;
-      text.style.transform = `translate(${dx}px, ${dy}px)`;
+    const text = el.querySelector('.plabel-text');
+    const tw = text.offsetWidth, th = text.offsetHeight;
+    const cx = (rect.minX + rect.maxX) / 2, cy = (rect.minY + rect.maxY) / 2;
+    let dx = x - cx, dy = y - cy;
+    const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+    const M = 10;
+    let lx = x, ly = y;
+    for (let t = 26; ; t += 8) {
+      const px = x + dx * t, py = y + dy * t;
+      const L = dx >= 0 ? px : px - tw;
+      const T = dy >= 0 ? py : py - th;
+      lx = L; ly = T;
+      const clear = L > rect.maxX + M || L + tw < rect.minX - M || T > rect.maxY + M || T + th < rect.minY - M;
+      if (clear || t > Math.max(w, h)) break;
     }
+    lx = Math.max(6, Math.min(w - tw - 6, lx));
+    ly = Math.max(6, Math.min(h - th - 6, ly));
+    for (let guard = 0; guard < 40; guard++) {
+      const hit = placed.find((p) => lx < p.lx + p.tw + 4 && lx + tw + 4 > p.lx && ly < p.ly + p.th + 4 && ly + th + 4 > p.ly);
+      if (!hit) break;
+      const below = hit.ly + hit.th + 4;
+      ly = below + th + 6 <= h - 6 ? below : Math.max(6, hit.ly - th - 4);
+    }
+    placed.push({ lx, ly, tw, th });
+    const ex = Math.max(lx, Math.min(x, lx + tw));
+    const ey = Math.max(ly, Math.min(y, ly + th));
+    const len = Math.hypot(ex - x, ey - y);
+    el.style.opacity = 1;
+    el.style.transform = `translate(${x}px, ${y}px)`;
+    const line = el.querySelector('.plabel-line');
+    line.style.width = `${len}px`;
+    line.style.transform = `rotate(${Math.atan2(ey - y, ex - x)}rad)`;
+    text.style.transform = `translate(${lx - x}px, ${ly - y}px)`;
   }
 
   let last = performance.now();
@@ -328,7 +369,7 @@ export function createScene(stageEl, labelsEl, bus) {
     const decode = st8.phase === 'decode';
     kvRack.visible = decode;
     sheet.visible = st8.standard;
-    arrows.visible = st8.showFlow;
+    arrows.visible = st8.showTraffic;
     scoreTile.visible = st8.showGrid;
     dialM.visible = dialL.visible = st8.showGrid;
     if (buildArrows._d !== decode) { buildArrows(decode); buildArrows._d = decode; }
@@ -376,12 +417,15 @@ export function createScene(stageEl, labelsEl, bus) {
     scoreTile.material.opacity = 0.7 + 0.25 * Math.sin(now * 0.005) * wig;
 
     // labels
+    const lw = stageEl.clientWidth, lh = stageEl.clientHeight;
+    const mrect = modelScreenRect(lw, lh);
+    const placed = [];
     for (const d of LABEL_DEFS) {
       const el = labelEls[d.id];
-      const modeOk = d.modes.includes(st8.tab);
+      const modeOk = d.modes.includes(st8.tab) && st8.showLabels;
       const stdOk = !d.std || st8.standard;
       const decOk = !d.decode || decode;
-      if (modeOk && stdOk && decOk) project(d.obj, d.off, el);
+      if (modeOk && stdOk && decOk && !dragging) project(d.obj, d.off, el, mrect, placed, lw, lh);
       else el.style.opacity = 0;
     }
 
