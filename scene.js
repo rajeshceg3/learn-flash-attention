@@ -321,9 +321,9 @@ export function createScene(stageEl, labelsEl, bus) {
     const cx = (rect.minX + rect.maxX) / 2, cy = (rect.minY + rect.maxY) / 2;
     let dx = x - cx, dy = y - cy;
     const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-    const M = 10;
+    const M = 16;
     let lx = x, ly = y;
-    for (let t = 26; ; t += 8) {
+    for (let t = 30; ; t += 8) {
       const px = x + dx * t, py = y + dy * t;
       const L = dx >= 0 ? px : px - tw;
       const T = dy >= 0 ? py : py - th;
@@ -331,14 +331,24 @@ export function createScene(stageEl, labelsEl, bus) {
       const clear = L > rect.maxX + M || L + tw < rect.minX - M || T > rect.maxY + M || T + th < rect.minY - M;
       if (clear || t > Math.max(w, h)) break;
     }
-    lx = Math.max(6, Math.min(w - tw - 6, lx));
-    ly = Math.max(6, Math.min(h - th - 6, ly));
+    const clampX = (v) => Math.max(4, Math.min(w - tw - 4, v));
+    const clampY = (v) => Math.max(4, Math.min(h - th - 4, v));
+    const clearOfModel = () => lx > rect.maxX + 2 || lx + tw < rect.minX - 2 || ly > rect.maxY + 2 || ly + th < rect.minY - 2;
+    lx = clampX(lx); ly = clampY(ly);
     for (let guard = 0; guard < 40; guard++) {
-      const hit = placed.find((p) => lx < p.lx + p.tw + 4 && lx + tw + 4 > p.lx && ly < p.ly + p.th + 4 && ly + th + 4 > p.ly);
+      const hit = placed.find((p) => lx < p.lx + p.tw + 6 && lx + tw + 6 > p.lx && ly < p.ly + p.th + 6 && ly + th + 6 > p.ly);
       if (!hit) break;
-      const below = hit.ly + hit.th + 4;
-      ly = below + th + 6 <= h - 6 ? below : Math.max(6, hit.ly - th - 4);
+      const below = hit.ly + hit.th + 6;
+      ly = below + th + 6 <= h - 6 ? below : Math.max(6, hit.ly - th - 6);
     }
+    // hard guarantee: after clamping/de-overlap, never intersect the silhouette; walk further out, else hide
+    let possible = true;
+    for (let guard = 0; guard < 60 && !clearOfModel(); guard++) {
+      const nx = clampX(lx + dx * 8), ny = clampY(ly + dy * 8);
+      if (nx === lx && ny === ly) { possible = false; break; }
+      lx = nx; ly = ny;
+    }
+    if (!possible || !clearOfModel()) { el.style.opacity = 0; return; }
     placed.push({ lx, ly, tw, th });
     const ex = Math.max(lx, Math.min(x, lx + tw));
     const ey = Math.max(ly, Math.min(y, ly + th));
