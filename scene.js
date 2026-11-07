@@ -334,21 +334,36 @@ export function createScene(stageEl, labelsEl, bus) {
     const clampX = (v) => Math.max(4, Math.min(w - tw - 4, v));
     const clampY = (v) => Math.max(4, Math.min(h - th - 4, v));
     const clearOfModel = () => lx > rect.maxX + 2 || lx + tw < rect.minX - 2 || ly > rect.maxY + 2 || ly + th < rect.minY - 2;
-    lx = clampX(lx); ly = clampY(ly);
-    for (let guard = 0; guard < 40; guard++) {
-      const hit = placed.find((p) => lx < p.lx + p.tw + 6 && lx + tw + 6 > p.lx && ly < p.ly + p.th + 6 && ly + th + 6 > p.ly);
-      if (!hit) break;
-      const below = hit.ly + hit.th + 6;
-      ly = below + th + 6 <= h - 6 ? below : Math.max(6, hit.ly - th - 6);
+    const lx0 = clampX(lx), ly0 = clampY(ly);
+    lx = lx0; ly = ly0;
+    const overlapsPlaced = () => placed.find((p) => lx < p.lx + p.tw + 6 && lx + tw + 6 > p.lx && ly < p.ly + p.th + 6 && ly + th + 6 > p.ly);
+    let okPlace = false;
+    for (let round = 0; round < 8 && !okPlace; round++) {
+      for (let guard = 0; guard < 40; guard++) {
+        const hit = overlapsPlaced();
+        if (!hit) break;
+        const below = hit.ly + hit.th + 6;
+        ly = below + th + 6 <= h - 4 ? below : Math.max(4, hit.ly - th - 6);
+      }
+      for (let guard = 0; guard < 60 && !clearOfModel(); guard++) {
+        const nx = clampX(lx + dx * 8), ny = clampY(ly + dy * 8);
+        if (nx === lx && ny === ly) break;
+        lx = nx; ly = ny;
+      }
+      okPlace = clearOfModel() && !overlapsPlaced();
     }
-    // hard guarantee: after clamping/de-overlap, never intersect the silhouette; walk further out, else hide
-    let possible = true;
-    for (let guard = 0; guard < 60 && !clearOfModel(); guard++) {
-      const nx = clampX(lx + dx * 8), ny = clampY(ly + dy * 8);
-      if (nx === lx && ny === ly) { possible = false; break; }
-      lx = nx; ly = ny;
+    if (!okPlace) {
+      // crowded stage (small screens): nearest free grid slot that clears both model and labels
+      let bd = 1e9, bx = -1, by = -1;
+      for (let gy = 4; gy <= h - th - 4; gy += 12) for (let gx = 4; gx <= w - tw - 4; gx += 12) {
+        lx = gx; ly = gy;
+        if (!clearOfModel() || overlapsPlaced()) continue;
+        const d2 = (gx - lx0) ** 2 + (gy - ly0) ** 2;
+        if (d2 < bd) { bd = d2; bx = gx; by = gy; }
+      }
+      if (bx >= 0) { lx = bx; ly = by; okPlace = true; }
     }
-    if (!possible || !clearOfModel()) { el.style.opacity = 0; return; }
+    if (!okPlace) { el.style.opacity = 0; return; }
     placed.push({ lx, ly, tw, th });
     const ex = Math.max(lx, Math.min(x, lx + tw));
     const ey = Math.max(ly, Math.min(y, ly + th));
