@@ -1,11 +1,11 @@
 // How FlashAttention Works - UI state, model and diagrams.
 // The 3D machine lives in scene.js; this file owns state, panels and SVG diagrams.
-import { createScene } from './scene.js?v=7';
+import { createScene } from './scene.js?v=8';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
-import { SEQS, DIMS, TILES, model, fmtBytes, fmtSeq } from './model.js?v=7';
+import { SEQS, DIMS, TILES, model, fmtBytes, fmtSeq } from './model.js?v=8';
 
 const defaults = {
   tab: 'kernel',
