@@ -42,13 +42,15 @@ ok('fmtBytes sane', fmtBytes(536870912) === '512 MB');
 
 // Label overlap rule (fleet ground rule): silhouette-aware placement, gated, hidden while orbiting
 ok('labels gated on showLabels chip', scene.includes('st8.showLabels'));
-ok('labels hidden while orbiting', scene.includes('!dragging) project('));
+ok('labels hidden while orbiting', scene.includes('!dragging) {
+        const it = prepareLabel('));
 ok('labels hidden when their part is hidden', scene.includes('d.obj.visible && !dragging'));
 ok('labels avoid model silhouette', scene.includes('modelScreenRect') && scene.includes('machineBox'));
 ok('labels de-overlap each other', scene.includes('placed.find'));
 ok('labels never intersect silhouette after clamping', scene.includes('clearOfModel') && scene.includes('free grid slot'));
 ok('leader lines never cross label text', scene.includes('segHitsRect') && scene.includes('leaderClear'));
 ok('earlier leaders repaired against later labels', scene.includes('repairLeaders') && scene.includes('if (placed.length > 1) repairLeaders('));
+ok('global solver assigns every label a crossing-free slot', scene.includes('solveLabels') && scene.includes('segHitsRect(b.x, b.y, b.ex, b.ey, box, 4)') && scene.includes('most constrained first'));
 ok('part labels reachable from kernel tab', scene.includes("modes: ['kernel','parts']"));
 ok('tab presets sync chips like the reference', app.includes('TAB_PRESETS') && app.includes('showLabels: true'));
 ok('memory-traffic chip drives the data arrows', scene.includes('arrows.visible = st8.showTraffic'));

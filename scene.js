@@ -340,11 +340,11 @@ export function createScene(stageEl, labelsEl, bus) {
     text.style.transform = `translate(${p.lx - p.x}px, ${p.ly - p.y}px)`;
   }
 
-  function project(obj, off, el, rect, placed, w, h) {
+  function prepareLabel(obj, off, el, rect, w, h) {
     obj.updateWorldMatrix(true, false);
     v.set(...off).applyMatrix4(obj.matrixWorld);
     v.project(camera);
-    if (v.z >= 1) { el.style.opacity = 0; return; }
+    if (v.z >= 1) { el.style.opacity = 0; return null; }
     const x = (v.x * 0.5 + 0.5) * w, y = (-v.y * 0.5 + 0.5) * h;
     const text = el.querySelector('.plabel-text');
     const tw = text.offsetWidth, th = text.offsetHeight;
@@ -360,17 +360,77 @@ export function createScene(stageEl, labelsEl, bus) {
       const clear = L > rect.maxX + 16 || L + tw < rect.minX - 16 || T > rect.maxY + 16 || T + th < rect.minY - 16;
       if (clear || t > Math.max(w, h)) break;
     }
+    lx = Math.max(4, Math.min(w - tw - 4, lx));
+    ly = Math.max(4, Math.min(h - th - 4, ly));
+    return { el, text, x, y, tw, th, plx: lx, ply: ly, dx, dy };
+  }
+
+  // a label at (lx,ly) conflicts if boxes overlap or a leader crosses text, either direction
+  function conflicts(p, lx, ly, placed) {
+    const box = { lx, ly, tw: p.tw, th: p.th };
+    const ex = Math.max(lx, Math.min(p.x, lx + p.tw)), ey = Math.max(ly, Math.min(p.y, ly + p.th));
+    for (const b of placed) {
+      if (boxOverlap(box, b, 6)) return true;
+      if (segHitsRect(p.x, p.y, ex, ey, b, 4)) return true;
+      if (segHitsRect(b.x, b.y, b.ex, b.ey, box, 4)) return true;
+    }
+    return false;
+  }
+
+  // global solver: assign every visible label a slot so no box overlaps, no box
+  // touches the model, and no leader crosses any text; most constrained first
+  let lastSolveKey = '', lastSolveOk = false;
+  function solveLabels(items, rect, w, h) {
+    const key = w + 'x' + h + '|' + items.map((p) => p.el.className + Math.round(p.x) + ',' + Math.round(p.y)).join('|');
+    if (key === lastSolveKey) return lastSolveOk;
+    const clearOfModel = (lx, ly, tw, th) => lx > rect.maxX + 2 || lx + tw < rect.minX - 2 || ly > rect.maxY + 2 || ly + th < rect.minY - 2;
+    for (const p of items) {
+      const cands = [];
+      if (clearOfModel(p.plx, p.ply, p.tw, p.th)) cands.push([p.plx, p.ply]);
+      for (let gy = 4; gy <= h - p.th - 4; gy += 12) for (let gx = 4; gx <= w - p.tw - 4; gx += 12) {
+        if (clearOfModel(gx, gy, p.tw, p.th)) cands.push([gx, gy]);
+      }
+      cands.sort((a, b) => ((a[0] - p.plx) ** 2 + (a[1] - p.ply) ** 2) - ((b[0] - p.plx) ** 2 + (b[1] - p.ply) ** 2));
+      p.cands = cands;
+    }
+    const order = [...items].sort((a, b) => a.cands.length - b.cands.length);
+    const assigned = [];
+    let visits = 0, done = false;
+    const dfs = (i) => {
+      if (done) return;
+      if (i === order.length) { done = true; return; }
+      const p = order[i];
+      for (const c of p.cands) {
+        if (++visits > 9000) return;
+        if (conflicts(p, c[0], c[1], assigned)) continue;
+        p.lx = c[0]; p.ly = c[1];
+        p.ex = Math.max(p.lx, Math.min(p.x, p.lx + p.tw));
+        p.ey = Math.max(p.ly, Math.min(p.y, p.ly + p.th));
+        assigned.push(p);
+        dfs(i + 1);
+        if (done) return;
+        assigned.pop();
+      }
+    };
+    dfs(0);
+    lastSolveKey = key; lastSolveOk = done;
+    return done;
+  }
+
+  // greedy fallback (per-label settle + crowded-stage grid slot) if the solver cannot free every crossing
+  function placeGreedy(p, rect, placed, w, h) {
+    const { x, y, tw, th, dx, dy } = p;
+    let lx = p.plx, ly = p.ply;
     const clampX = (vv) => Math.max(4, Math.min(w - tw - 4, vv));
     const clampY = (vv) => Math.max(4, Math.min(h - th - 4, vv));
     const clearOfModel = () => lx > rect.maxX + 2 || lx + tw < rect.minX - 2 || ly > rect.maxY + 2 || ly + th < rect.minY - 2;
-    const overlapsPlaced = () => placed.find((p) => boxOverlap({ lx, ly, tw, th }, p, 6));
+    const overlapsPlaced = () => placed.find((b) => boxOverlap({ lx, ly, tw, th }, b, 6));
     const leaderCrossings = () => {
       const ex = Math.max(lx, Math.min(x, lx + tw)), ey = Math.max(ly, Math.min(y, ly + th));
-      return placed.filter((p) => segHitsRect(x, y, ex, ey, p, 4)).length;
+      return placed.filter((b) => segHitsRect(x, y, ex, ey, b, 4)).length;
     };
     const leaderClear = () => leaderCrossings() === 0;
-    const boxCrossed = () => placed.filter((p) => segHitsRect(p.x, p.y, p.ex, p.ey, { lx, ly, tw, th }, 4)).length;
-    lx = clampX(lx); ly = clampY(ly);
+    const boxCrossed = () => placed.filter((b) => segHitsRect(b.x, b.y, b.ex, b.ey, { lx, ly, tw, th }, 4)).length;
     const lx0 = lx, ly0 = ly;
     let okPlace = false;
     for (let round = 0; round < 14 && !okPlace; round++) {
@@ -405,8 +465,8 @@ export function createScene(stageEl, labelsEl, bus) {
       if (bx >= 0) { lx = bx; ly = by; okPlace = true; }
       else if (bcx >= 0) { lx = bcx; ly = bcy; okPlace = true; }
     }
-    if (!okPlace) { el.style.opacity = 0; return; }
-    const p = { el, text, x, y, lx, ly, tw, th };
+    if (!okPlace) { p.el.style.opacity = 0; return; }
+    p.lx = lx; p.ly = ly;
     finishLabel(p);
     placed.push(p);
   }
@@ -522,16 +582,24 @@ export function createScene(stageEl, labelsEl, bus) {
     // labels
     const lw = stageEl.clientWidth, lh = stageEl.clientHeight;
     const mrect = modelScreenRect(lw, lh);
-    const placed = [];
+    const items = [];
     for (const d of LABEL_DEFS) {
       const el = labelEls[d.id];
       const modeOk = d.modes.includes(st8.tab) && st8.showLabels;
       const stdOk = !d.std || st8.standard;
       const decOk = !d.decode || decode;
-      if (modeOk && stdOk && decOk && d.obj.visible && !dragging) project(d.obj, d.off, el, mrect, placed, lw, lh);
-      else el.style.opacity = 0;
+      if (modeOk && stdOk && decOk && d.obj.visible && !dragging) {
+        const it = prepareLabel(d.obj, d.off, el, mrect, lw, lh);
+        if (it) items.push(it);
+      } else el.style.opacity = 0;
     }
-    if (placed.length > 1) repairLeaders(placed, mrect, lw, lh);
+    if (items.length && solveLabels(items, mrect, lw, lh)) {
+      for (const p of items) finishLabel(p);
+    } else {
+      const placed = [];
+      for (const it of items) placeGreedy(it, mrect, placed, lw, lh);
+      if (placed.length > 1) repairLeaders(placed, mrect, lw, lh);
+    }
 
     renderer.render(scene, camera);
   }
