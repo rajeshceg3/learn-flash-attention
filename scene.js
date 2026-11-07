@@ -369,6 +369,7 @@ export function createScene(stageEl, labelsEl, bus) {
       return placed.filter((p) => segHitsRect(x, y, ex, ey, p, 4)).length;
     };
     const leaderClear = () => leaderCrossings() === 0;
+    const boxCrossed = () => placed.filter((p) => segHitsRect(p.x, p.y, p.ex, p.ey, { lx, ly, tw, th }, 4)).length;
     lx = clampX(lx); ly = clampY(ly);
     const lx0 = lx, ly0 = ly;
     let okPlace = false;
@@ -384,7 +385,7 @@ export function createScene(stageEl, labelsEl, bus) {
         if (nx === lx && ny === ly) break;
         lx = nx; ly = ny;
       }
-      okPlace = clearOfModel() && !overlapsPlaced() && leaderClear();
+      okPlace = clearOfModel() && !overlapsPlaced() && leaderClear() && boxCrossed() === 0;
       if (!okPlace) {
         const ny = clampY(ly + 16);
         ly = ny !== ly ? ny : clampY(ly - 32);
@@ -397,7 +398,7 @@ export function createScene(stageEl, labelsEl, bus) {
         lx = gx; ly = gy;
         if (!clearOfModel() || overlapsPlaced()) continue;
         const d2 = (gx - lx0) ** 2 + (gy - ly0) ** 2;
-        const c = leaderCrossings();
+        const c = leaderCrossings() + boxCrossed();
         if (c === 0 && d2 < bd) { bd = d2; bx = gx; by = gy; }
         if (c < bc || (c === bc && d2 < bcd)) { bc = c; bcd = d2; bcx = gx; bcy = gy; }
       }
@@ -410,28 +411,46 @@ export function createScene(stageEl, labelsEl, bus) {
     placed.push(p);
   }
 
-  // repair pass: a label placed earlier must not have its leader cross a label placed later
+  // repair pass: no leader may cross any label's text; move whichever side frees the crossing
   function repairLeaders(placed, rect, w, h) {
-    for (const a of placed) {
-      for (let guard = 0; guard < 40; guard++) {
-        const hit = placed.find((b) => b !== a && segHitsRect(a.x, a.y, a.ex, a.ey, b, 4));
-        if (!hit) break;
-        let moved = false;
-        for (let r = 10; r <= 130 && !moved; r += 10) {
-          for (let k = 0; k < 12 && !moved; k++) {
-            const ang = (k / 12) * Math.PI * 2;
-            const nx = Math.max(4, Math.min(w - a.tw - 4, a.lx + Math.cos(ang) * r));
-            const ny = Math.max(4, Math.min(h - a.th - 4, a.ly + Math.sin(ang) * r));
-            const clearM = nx > rect.maxX + 2 || nx + a.tw < rect.minX - 2 || ny > rect.maxY + 2 || ny + a.th < rect.minY - 2;
-            if (!clearM) continue;
-            if (placed.find((b) => b !== a && boxOverlap({ lx: nx, ly: ny, tw: a.tw, th: a.th }, b, 6))) continue;
-            const ex = Math.max(nx, Math.min(a.x, nx + a.tw)), ey = Math.max(ny, Math.min(a.y, ny + a.th));
-            if (placed.find((b) => b !== a && segHitsRect(a.x, a.y, ex, ey, b, 4))) continue;
-            a.lx = nx; a.ly = ny; finishLabel(a); moved = true;
-          }
-        }
-        if (!moved) break;
+    const fits = (p, nx, ny) => {
+      if (!(nx > rect.maxX + 2 || nx + p.tw < rect.minX - 2 || ny > rect.maxY + 2 || ny + p.th < rect.minY - 2)) return false;
+      const cand = { lx: nx, ly: ny, tw: p.tw, th: p.th };
+      for (const b of placed) {
+        if (b === p) continue;
+        if (boxOverlap(cand, b, 6)) return false;
+        if (segHitsRect(b.x, b.y, b.ex, b.ey, cand, 4)) return false; // another leader vs the candidate box
       }
+      const ex = Math.max(nx, Math.min(p.x, nx + p.tw)), ey = Math.max(ny, Math.min(p.y, ny + p.th));
+      for (const b of placed) {
+        if (b === p) continue;
+        if (segHitsRect(p.x, p.y, ex, ey, b, 4)) return false; // p's leader vs another box
+      }
+      return true;
+    };
+    const tryMove = (p) => {
+      for (let r = 10; r <= 170; r += 10) {
+        for (let k = 0; k < 12; k++) {
+          const ang = (k / 12) * Math.PI * 2;
+          const nx = Math.max(4, Math.min(w - p.tw - 4, p.lx + Math.cos(ang) * r));
+          const ny = Math.max(4, Math.min(h - p.th - 4, p.ly + Math.sin(ang) * r));
+          if (fits(p, nx, ny)) { p.lx = nx; p.ly = ny; finishLabel(p); return true; }
+        }
+      }
+      return false;
+    };
+    for (let iter = 0; iter < 6; iter++) {
+      let pair = null;
+      for (const a of placed) {
+        for (const b of placed) {
+          if (a !== b && segHitsRect(a.x, a.y, a.ex, a.ey, b, 4)) { pair = [a, b]; break; }
+        }
+        if (pair) break;
+      }
+      if (!pair) return;
+      if (tryMove(pair[1])) continue; // move the crossed label out of the leader's path
+      if (tryMove(pair[0])) continue; // or re-seat the label whose leader crosses
+      return; // best effort: no freeing slot this frame
     }
   }
 
