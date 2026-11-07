@@ -425,7 +425,7 @@ export function createScene(stageEl, labelsEl, bus) {
       const modeOk = d.modes.includes(st8.tab) && st8.showLabels;
       const stdOk = !d.std || st8.standard;
       const decOk = !d.decode || decode;
-      if (modeOk && stdOk && decOk && !dragging) project(d.obj, d.off, el, mrect, placed, lw, lh);
+      if (modeOk && stdOk && decOk && d.obj.visible && !dragging) project(d.obj, d.off, el, mrect, placed, lw, lh);
       else el.style.opacity = 0;
     }
 
