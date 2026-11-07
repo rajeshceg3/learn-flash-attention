@@ -46,7 +46,7 @@ ok('labels hidden while orbiting', scene.includes('!dragging) project('));
 ok('labels hidden when their part is hidden', scene.includes('d.obj.visible && !dragging'));
 ok('labels avoid model silhouette', scene.includes('modelScreenRect') && scene.includes('machineBox'));
 ok('labels de-overlap each other', scene.includes('placed.find'));
-ok('labels never intersect silhouette after clamping', scene.includes('clearOfModel') && scene.includes('else hide'));
+ok('labels never intersect silhouette after clamping', scene.includes('clearOfModel') && scene.includes('nearest free grid slot'));
 ok('part labels reachable from kernel tab', scene.includes("modes: ['kernel','parts']"));
 ok('tab presets sync chips like the reference', app.includes('TAB_PRESETS') && app.includes('showLabels: true'));
 ok('memory-traffic chip drives the data arrows', scene.includes('arrows.visible = st8.showTraffic'));
