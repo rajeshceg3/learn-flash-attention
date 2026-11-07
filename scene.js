@@ -310,6 +310,36 @@ export function createScene(stageEl, labelsEl, bus) {
   resize();
 
   const v = new THREE.Vector3();
+
+  // leader-line geometry: a leader runs from the part's anchor point to the
+  // nearest edge of its label box, and must never cross any label's text
+  function segHitsRect(ax, ay, bx, by, r, pad) {
+    const x0 = r.lx - pad, y0 = r.ly - pad, x1 = r.lx + r.tw + pad, y1 = r.ly + r.th + pad;
+    const dx = bx - ax, dy = by - ay;
+    let t0 = 0, t1 = 1;
+    const pp = [-dx, dx, -dy, dy], qq = [ax - x0, x1 - ax, ay - y0, y1 - ay];
+    for (let i = 0; i < 4; i++) {
+      if (pp[i] === 0) { if (qq[i] < 0) return false; continue; }
+      const t = qq[i] / pp[i];
+      if (pp[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+      else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+    return t0 < t1 && t1 > 0 && t0 < 1;
+  }
+  const boxOverlap = (a, b, pad) => a.lx < b.lx + b.tw + pad && a.lx + a.tw + pad > b.lx && a.ly < b.ly + b.th + pad && a.ly + a.th + pad > b.ly;
+
+  function finishLabel(p) {
+    p.ex = Math.max(p.lx, Math.min(p.x, p.lx + p.tw));
+    p.ey = Math.max(p.ly, Math.min(p.y, p.ly + p.th));
+    const len = Math.hypot(p.ex - p.x, p.ey - p.y);
+    const el = p.el, text = p.text, line = el.querySelector('.plabel-line');
+    el.style.opacity = 1;
+    el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+    line.style.width = `${len}px`;
+    line.style.transform = `rotate(${Math.atan2(p.ey - p.y, p.ex - p.x)}rad)`;
+    text.style.transform = `translate(${p.lx - p.x}px, ${p.ly - p.y}px)`;
+  }
+
   function project(obj, off, el, rect, placed, w, h) {
     obj.updateWorldMatrix(true, false);
     v.set(...off).applyMatrix4(obj.matrixWorld);
@@ -321,24 +351,28 @@ export function createScene(stageEl, labelsEl, bus) {
     const cx = (rect.minX + rect.maxX) / 2, cy = (rect.minY + rect.maxY) / 2;
     let dx = x - cx, dy = y - cy;
     const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
-    const M = 16;
     let lx = x, ly = y;
     for (let t = 30; ; t += 8) {
       const px = x + dx * t, py = y + dy * t;
       const L = dx >= 0 ? px : px - tw;
       const T = dy >= 0 ? py : py - th;
       lx = L; ly = T;
-      const clear = L > rect.maxX + M || L + tw < rect.minX - M || T > rect.maxY + M || T + th < rect.minY - M;
+      const clear = L > rect.maxX + 16 || L + tw < rect.minX - 16 || T > rect.maxY + 16 || T + th < rect.minY - 16;
       if (clear || t > Math.max(w, h)) break;
     }
-    const clampX = (v) => Math.max(4, Math.min(w - tw - 4, v));
-    const clampY = (v) => Math.max(4, Math.min(h - th - 4, v));
+    const clampX = (vv) => Math.max(4, Math.min(w - tw - 4, vv));
+    const clampY = (vv) => Math.max(4, Math.min(h - th - 4, vv));
     const clearOfModel = () => lx > rect.maxX + 2 || lx + tw < rect.minX - 2 || ly > rect.maxY + 2 || ly + th < rect.minY - 2;
-    const lx0 = clampX(lx), ly0 = clampY(ly);
-    lx = lx0; ly = ly0;
-    const overlapsPlaced = () => placed.find((p) => lx < p.lx + p.tw + 6 && lx + tw + 6 > p.lx && ly < p.ly + p.th + 6 && ly + th + 6 > p.ly);
+    const overlapsPlaced = () => placed.find((p) => boxOverlap({ lx, ly, tw, th }, p, 6));
+    const leaderCrossings = () => {
+      const ex = Math.max(lx, Math.min(x, lx + tw)), ey = Math.max(ly, Math.min(y, ly + th));
+      return placed.filter((p) => segHitsRect(x, y, ex, ey, p, 4)).length;
+    };
+    const leaderClear = () => leaderCrossings() === 0;
+    lx = clampX(lx); ly = clampY(ly);
+    const lx0 = lx, ly0 = ly;
     let okPlace = false;
-    for (let round = 0; round < 8 && !okPlace; round++) {
+    for (let round = 0; round < 14 && !okPlace; round++) {
       for (let guard = 0; guard < 40; guard++) {
         const hit = overlapsPlaced();
         if (!hit) break;
@@ -350,30 +384,55 @@ export function createScene(stageEl, labelsEl, bus) {
         if (nx === lx && ny === ly) break;
         lx = nx; ly = ny;
       }
-      okPlace = clearOfModel() && !overlapsPlaced();
+      okPlace = clearOfModel() && !overlapsPlaced() && leaderClear();
+      if (!okPlace) {
+        const ny = clampY(ly + 16);
+        ly = ny !== ly ? ny : clampY(ly - 32);
+      }
     }
     if (!okPlace) {
-      // crowded stage (small screens): nearest free grid slot that clears both model and labels
-      let bd = 1e9, bx = -1, by = -1;
+      // crowded stage (small screens): free grid slot clearing model, labels and leader lines
+      let bd = 1e9, bx = -1, by = -1, bc = 1e9, bcd = 1e9, bcx = -1, bcy = -1;
       for (let gy = 4; gy <= h - th - 4; gy += 12) for (let gx = 4; gx <= w - tw - 4; gx += 12) {
         lx = gx; ly = gy;
         if (!clearOfModel() || overlapsPlaced()) continue;
         const d2 = (gx - lx0) ** 2 + (gy - ly0) ** 2;
-        if (d2 < bd) { bd = d2; bx = gx; by = gy; }
+        const c = leaderCrossings();
+        if (c === 0 && d2 < bd) { bd = d2; bx = gx; by = gy; }
+        if (c < bc || (c === bc && d2 < bcd)) { bc = c; bcd = d2; bcx = gx; bcy = gy; }
       }
       if (bx >= 0) { lx = bx; ly = by; okPlace = true; }
+      else if (bcx >= 0) { lx = bcx; ly = bcy; okPlace = true; }
     }
     if (!okPlace) { el.style.opacity = 0; return; }
-    placed.push({ lx, ly, tw, th });
-    const ex = Math.max(lx, Math.min(x, lx + tw));
-    const ey = Math.max(ly, Math.min(y, ly + th));
-    const len = Math.hypot(ex - x, ey - y);
-    el.style.opacity = 1;
-    el.style.transform = `translate(${x}px, ${y}px)`;
-    const line = el.querySelector('.plabel-line');
-    line.style.width = `${len}px`;
-    line.style.transform = `rotate(${Math.atan2(ey - y, ex - x)}rad)`;
-    text.style.transform = `translate(${lx - x}px, ${ly - y}px)`;
+    const p = { el, text, x, y, lx, ly, tw, th };
+    finishLabel(p);
+    placed.push(p);
+  }
+
+  // repair pass: a label placed earlier must not have its leader cross a label placed later
+  function repairLeaders(placed, rect, w, h) {
+    for (const a of placed) {
+      for (let guard = 0; guard < 40; guard++) {
+        const hit = placed.find((b) => b !== a && segHitsRect(a.x, a.y, a.ex, a.ey, b, 4));
+        if (!hit) break;
+        let moved = false;
+        for (let r = 10; r <= 130 && !moved; r += 10) {
+          for (let k = 0; k < 12 && !moved; k++) {
+            const ang = (k / 12) * Math.PI * 2;
+            const nx = Math.max(4, Math.min(w - a.tw - 4, a.lx + Math.cos(ang) * r));
+            const ny = Math.max(4, Math.min(h - a.th - 4, a.ly + Math.sin(ang) * r));
+            const clearM = nx > rect.maxX + 2 || nx + a.tw < rect.minX - 2 || ny > rect.maxY + 2 || ny + a.th < rect.minY - 2;
+            if (!clearM) continue;
+            if (placed.find((b) => b !== a && boxOverlap({ lx: nx, ly: ny, tw: a.tw, th: a.th }, b, 6))) continue;
+            const ex = Math.max(nx, Math.min(a.x, nx + a.tw)), ey = Math.max(ny, Math.min(a.y, ny + a.th));
+            if (placed.find((b) => b !== a && segHitsRect(a.x, a.y, ex, ey, b, 4))) continue;
+            a.lx = nx; a.ly = ny; finishLabel(a); moved = true;
+          }
+        }
+        if (!moved) break;
+      }
+    }
   }
 
   let last = performance.now();
@@ -453,6 +512,7 @@ export function createScene(stageEl, labelsEl, bus) {
       if (modeOk && stdOk && decOk && d.obj.visible && !dragging) project(d.obj, d.off, el, mrect, placed, lw, lh);
       else el.style.opacity = 0;
     }
+    if (placed.length > 1) repairLeaders(placed, mrect, lw, lh);
 
     renderer.render(scene, camera);
   }
