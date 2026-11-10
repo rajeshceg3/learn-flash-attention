@@ -49,7 +49,7 @@ def main():
     print('FAILURES=%d' % len(failures))
     evidence = {'repo': 'learn-flash-attention', 'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'failures': failures}
     (REPO / '.cursor/skills/verify-learn-flash-attention').mkdir(parents=True, exist_ok=True)
-    with open(REPO / '.cursor/skills/verify-learn-flash-attention' + '/evidence.json', 'w') as f:
+    with open(REPO / '.cursor/skills/verify-learn-flash-attention/evidence.json', 'w') as f:
         json.dump(evidence, f, indent=2)
     return 1 if failures else 0
 
