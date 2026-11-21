@@ -21,7 +21,7 @@
           Inference Interactive
         </p>
         <h1 class="title">How <span class="hl hl-big">FlashAttention</span> Works<span class="doodle doodle-title" aria-hidden="true"></span></h1>
-        <p class="intro">Explore a real attention kernel, change its setup and see how tiling and fast on-chip memory speed up LLM inference.</p>
+        <p class="intro">For every new word it writes, the model re-reads the whole conversation so far. That re-reading is the slow part. Explore a real attention kernel and see how the fast version does it.</p>
         <div class="tabs" role="tablist" aria-label="What to look at">
           <button type="button" role="tab" aria-selected="true" class="tab wob is-on" data-tab="kernel" data-showcase="tab-kernel">
             <svg viewBox="0 0 64 56" class="tab-art" aria-hidden="true"><rect x="10" y="14" width="44" height="30" rx="5" fill="#3a3438"/><rect x="21" y="21" width="22" height="16" rx="3" fill="#f2c94c" stroke="#c9951a" stroke-width="2"/><path d="M15 8v6M25 8v6M35 8v6M45 8v6M15 44v6M25 44v6M35 44v6M45 44v6" stroke="#3a3438" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
@@ -187,3 +187,4 @@
     <script type="module" src="./app.js?v=11"></script>
   </body>
 </html>
+
